@@ -93,6 +93,24 @@ f2m config set base_url https://www.new-domain.tld
 
 ---
 
+## 🛠 توسعه و تست
+
+راه‌اندازی محیط توسعه و اجرای آزمون‌های خودکار:
+
+```bash
+# ساخت محیط مجازی
+python3 -m venv .venv
+source .venv/bin/activate
+
+# نصب وابستگی‌های توسعه
+pip install -e ".[dev]"
+
+# اجرای آزمون‌های خودکار آفلاین
+pytest
+```
+
+---
+
 ## 🛠 رفع اشکال
 
 - **چیزی پیدا نشد** → دستور `f2m test` را اجرا کنید

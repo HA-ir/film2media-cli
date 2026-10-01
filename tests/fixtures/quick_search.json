@@ -1,0 +1,26 @@
+[
+  {
+    "title": "<em>Inception</em>",
+    "title_fa": "تلقین",
+    "type": "movie",
+    "year": "2010",
+    "rating": "8.8",
+    "url": "movies/inception-2010/",
+    "image": "https://www.myf2ms.top/posters/inception.jpg",
+    "meta_data": "اکشن، علمی تخیلی",
+    "is_dubbled": true,
+    "is_hardsub": true
+  },
+  {
+    "title": "<em>Breaking</em> Bad",
+    "title_fa": "بریکینگ بد",
+    "type": "series",
+    "year": "2008",
+    "rating": "9.5",
+    "url": "series/breaking-bad/",
+    "image": "https://www.myf2ms.top/posters/bb.jpg",
+    "meta_data": "جنایی، درام",
+    "is_dubbled": false,
+    "is_hardsub": true
+  }
+]
