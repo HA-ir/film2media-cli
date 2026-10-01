@@ -93,6 +93,24 @@ Other keys:
 
 ---
 
+## 🛠 Development & Testing
+
+Set up the development environment and run automated tests:
+
+```bash
+# Create virtual environment
+python3 -m venv .venv
+source .venv/bin/activate
+
+# Install development dependencies
+pip install -e ".[dev]"
+
+# Run offline automated test suite
+pytest
+```
+
+---
+
 ## 🛠 Troubleshooting
 
 - **Nothing found** → run `f2m test`
