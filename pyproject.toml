@@ -24,7 +24,9 @@ classifiers = [
     "Environment :: Console",
     "Topic :: Multimedia :: Video",
 ]
-dependencies = []
+dependencies = [
+    "beautifulsoup4>=4.11.0",
+]
 
 [project.optional-dependencies]
 dev = [

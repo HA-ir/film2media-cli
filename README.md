@@ -112,6 +112,17 @@ Precedence: `Environment Variables (F2M_*) > Local ./f2m.conf > User XDG Config 
 
 ---
 
+## 🌐 Network & Scraper Architecture
+
+- **DOM Scraper**: Built with `beautifulsoup4` using Python's standard `html.parser` for resilient, tree-based HTML extraction that gracefully tolerates upstream attribute reordering and whitespace variations.
+- **Resilient HTTP Client**:
+  - **Bounded Retries**: Automatically retries transient network errors (timeouts, HTTP 429, 502, 503, 504) up to 2 times with exponential backoff.
+  - **Mirror Failover**: Systematically falls back across configured `mirrors` when the primary base URL fails.
+  - **Session-Transient Redirects**: Domain redirects are remembered in-memory for the running session and never modify on-disk configuration automatically.
+  - **Proxy Support**: Supports HTTP, HTTPS, and SOCKS5 proxies.
+
+---
+
 ## 🛠 Development & Testing
 
 Set up the development environment and run automated tests:
