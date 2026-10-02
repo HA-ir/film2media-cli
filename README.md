@@ -52,21 +52,78 @@ Optional companions:
 
 Run without arguments for the interactive menu:
 
-```
+```bash
 f2m
 ```
 
-Or use commands:
+Or use direct subcommands:
 
 | Command | Description |
 |---|---|
-| `f2m search "breaking bad"` | Search |
-| `f2m categories` | Browse categories |
-| `f2m url <post-url>` | Open a post directly |
-| `f2m test` | Connectivity test |
-| `f2m config` | Show config |
+| `f2m search <query>` | Search movies & series (interactive picker by default) |
+| `f2m url <post-url>` | Open or inspect a post page directly |
+| `f2m categories` | Browse categories & genres |
+| `f2m config` | Show active configuration |
+| `f2m config get <key>` | Get a specific configuration value |
+| `f2m config set <key> <val>` | Save a configuration key |
+| `f2m test` | Connectivity and mirror check |
+| `f2m version` | Show application version |
+| `f2m help` | Show usage assistance |
 
-Inside menus you can pick items like `1`, ranges like `1,3,5-8`, or `all`.
+Inside interactive menus you can select items like `1`, ranges like `1,3,5-8`, or `all`.
+
+### 🤖 Machine-Readable & Automation Modes
+
+f2m provides first-class support for scripting and Unix pipelines with strict stream separation (data to `stdout`, diagnostics/spinners to `stderr`):
+
+**1. Machine-Readable JSON (`--json`)**
+Outputs valid, unadorned JSON directly to `stdout` without spinner or ANSI contamination:
+```bash
+# Pipe search results directly to jq
+f2m search "Inception" --json | jq '.[0].title'
+
+# Inspect complete post structure (versions, qualities, direct links)
+f2m url "https://www.myf2ms.top/movies/inception-2010/" --json | jq .
+
+# Dump full configuration as JSON
+f2m config --json | jq .base_url
+```
+
+**2. Unix Pipeline Integration (`--plain`)**
+Outputs clean, unformatted tab- or newline-delimited text on `stdout`:
+```bash
+# Feed media direct links straight to aria2c
+f2m url "https://www.myf2ms.top/movies/inception-2010/" --plain | aria2c -i -
+
+# Filter search results with awk
+f2m search "Inception" --plain | awk -F'\t' '{print $2, $3, $5}'
+
+# Extract a single configuration value
+BASE_URL=$(f2m config get base_url --plain)
+```
+
+**Global Options:**
+- `--json`: Machine-readable JSON output on `stdout` (enforces non-interactive mode).
+- `--plain`: Tab- or newline-delimited unadorned output on `stdout` (enforces non-interactive mode).
+- `--no-color`: Disable all ANSI terminal colors (honors `NO_COLOR`).
+- `--config <path>`: Override configuration file path.
+- `-h, --help`: Display help screen.
+- `-V, --version`: Display version.
+
+### 🔢 Exit Codes
+
+Scripts can inspect deterministic POSIX exit codes:
+
+| Code | Meaning |
+|---|---|
+| `0` | Success |
+| `1` | Operational runtime error |
+| `2` | Invalid CLI invocation, syntax error, or conflicting flags |
+| `3` | Configuration error (`F2MConfigError`) |
+| `4` | Network timeout, DNS failure, or mirror exhaustion (`F2MNetworkError`) |
+| `5` | Upstream HTML/JSON parsing failure (`F2MParseError`) |
+| `6` | Resource not found (empty search results, HTTP 404) |
+| `130` | Process interrupted by user (`SIGINT` / `Ctrl+C`) |
 
 ---
 

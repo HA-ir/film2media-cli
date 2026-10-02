@@ -69,6 +69,11 @@ class HttpClient:
         """Active base URL for the running session (transiently updated on redirects)."""
         return self._session_base_url
 
+    @property
+    def base_url(self) -> str:
+        """Configured base URL (or current active base URL)."""
+        return self._session_base_url
+
     def set_session_base_url(self, new_url: str) -> None:
         """Update session-transient base URL without touching on-disk config."""
         self._session_base_url = new_url.rstrip("/")

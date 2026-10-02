@@ -7,6 +7,7 @@ from f2m.core.exceptions import (
     F2MConfigError,
     F2MNetworkError,
     F2MParseError,
+    F2MCliError,
 )
 from f2m.core.models import (
     SearchResult,
@@ -41,6 +42,7 @@ __all__ = [
     "F2MConfigError",
     "F2MNetworkError",
     "F2MParseError",
+    "F2MCliError",
     "SearchResult",
     "Card",
     "Episode",

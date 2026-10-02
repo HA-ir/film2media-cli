@@ -21,3 +21,11 @@ class F2MNetworkError(F2MError):
 class F2MParseError(F2MError):
     """Raised when markup, response, or entity parsing fails."""
     pass
+
+
+class F2MCliError(F2MError):
+    """Raised when command-line argument parsing or validation fails."""
+    def __init__(self, message: str, exit_code: int = 2) -> None:
+        super().__init__(message)
+        self.exit_code = exit_code
+
