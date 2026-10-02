@@ -72,24 +72,43 @@ Inside menus you can pick items like `1`, ranges like `1,3,5-8`, or `all`.
 
 ## ⚙️ Configuration
 
-A `f2m.conf` file is created next to the program on first run.
+Configuration is stored in standard user directories (XDG compliant):
+- **Linux / macOS**: `~/.config/f2m/config.ini` (or `$XDG_CONFIG_HOME/f2m/config.ini`)
+- **Windows**: `%APPDATA%\f2m\config.ini`
+- **Portable mode**: If `./f2m.conf` exists in your current directory, it takes precedence.
+- **Legacy migration**: If you previously used an `f2m.conf` adjacent to the executable, it is automatically and non-destructively migrated on first run.
 
-**If the site domain changes:**
-
+**View configuration:**
 ```bash
-f2m config set base_url https://www.new-domain.tld
+f2m config
 ```
 
-In most cases you don't need this — f2m follows redirects automatically.
+**Edit a configuration key:**
+```bash
+f2m config set <key> <value>
+# Example: change domain
+f2m config set base_url https://www.new-domain.tld
+# Example: set proxy
+f2m config set proxy http://127.0.0.1:8080
+```
 
-Other keys:
+Supported keys:
 
 | Key | Description |
 |---|---|
-| `mirrors` | Fallback domains |
-| `proxy` | Proxy for requests & downloads |
-| `player` | `auto` / `mpv` / `vlc` / `potplayer` |
-| `download_dir` | Downloads folder |
+| `base_url` | Primary site URL |
+| `mirrors` | Fallback domains (comma-separated) |
+| `proxy` | Proxy for requests & downloads (e.g. `http://127.0.0.1:8080`, empty = off) |
+| `player` | Preferred player: `auto` / `mpv` / `vlc` / `potplayer` |
+| `download_dir` | Downloads destination folder |
+| `search_sort` | Sort order for quick search |
+| `user_agent` | HTTP User-Agent string |
+
+**Environment Variable Overrides:**
+You can temporarily override any setting without editing files:
+`F2M_BASE_URL`, `F2M_MIRRORS`, `F2M_PROXY`, `F2M_PLAYER`, `F2M_DOWNLOAD_DIR`, `F2M_SEARCH_SORT`, `F2M_USER_AGENT`, or specify a custom config file path with `F2M_CONFIG`.
+
+Precedence: `Environment Variables (F2M_*) > Local ./f2m.conf > User XDG Config > Defaults`.
 
 ---
 

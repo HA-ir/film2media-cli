@@ -40,6 +40,32 @@ from urllib import error as urlerror
 from urllib import parse as urlparse
 from urllib import request as urlrequest
 
+from f2m.core.exceptions import (
+    F2MError,
+    F2MConfigError,
+    F2MNetworkError,
+    F2MParseError,
+)
+from f2m.core.models import (
+    SearchResult,
+    Card,
+    Episode,
+    Quality,
+    MediaVersion,
+    Version,
+    Season,
+    MediaPost,
+    Post,
+)
+from f2m.core.config import (
+    CONFIG_DEFAULTS,
+    CONF_COMMENT,
+    ConfigurationProfile,
+    ConfigManager,
+    resolve_config_path,
+    validate_key_value,
+)
+
 VERSION = "1.1.0"
 APP = "f2m"
 TIMEOUT = 25
@@ -229,84 +255,40 @@ def parse_selection(raw: str, count: int) -> list[int]:
 # ---------------------------------------------------------------------------
 # 2. CONFIG
 # ---------------------------------------------------------------------------
-if getattr(sys, "frozen", False):
-    CONF_PATH = os.path.join(os.path.dirname(os.path.abspath(sys.executable)), "f2m.conf")
-else:
-    CONF_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "f2m.conf")
-
-DEFAULT_UA = ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
-              "(KHTML, like Gecko) Chrome/152.0.0.0 Safari/537.36")
-
-CONFIG_DEFAULTS = {
-    "base_url": "https://www.myf2ms.top",
-    "mirrors": "https://www.myf2m.info, https://www.myf2ms.top",
-    "proxy": "",
-    "search_sort": "modified_at:desc",
-    "player": "auto",
-    "download_dir": "~/Downloads/f2m",
-    "user_agent": DEFAULT_UA,
-}
-
-CONF_COMMENT = """\
-# ── f2m.conf ─ film2media terminal client config ─────────────────
-# base_url     : main site URL (auto-updated on domain redirect)
-# mirrors      : comma-separated fallback domains
-# proxy        : optional proxy for requests/aria2c/player (empty = off)
-# search_sort  : quick-search sort (e.g. modified_at:desc)
-# player       : auto | mpv | vlc | potplayer
-# download_dir : downloads destination
-# ─────────────────────────────────────────────────────────────────
-"""
-
-_cfg: dict[str, str] = {}
+_config_mgr = ConfigManager()
+CONF_PATH = str(_config_mgr.file_path)
+_cfg: dict[str, Any] = _config_mgr._cfg
 
 
 def load_config() -> None:
-    parser = configparser.ConfigParser(interpolation=None)
-    parser.read(CONF_PATH, encoding="utf-8")
-    _cfg.clear()
-    _cfg.update(CONFIG_DEFAULTS)
-    if parser.has_section("f2m"):
-        for key, val in parser.items("f2m"):
-            if key in CONFIG_DEFAULTS:
-                _cfg[key] = val.strip()
-    _cfg["mirrors"] = [u.strip() for u in _cfg["mirrors"].split(",") if u.strip()] or []
-    _cfg["_raw_mirrors"] = ", ".join(_cfg["mirrors"]) if isinstance(_cfg["mirrors"], list) else _cfg["mirrors"]
+    _config_mgr.load()
+    global CONF_PATH, _cfg
+    CONF_PATH = str(_config_mgr.file_path)
+    _cfg = _config_mgr._cfg
 
 
 def save_config() -> None:
-    with open(CONF_PATH, "w", encoding="utf-8") as fh:
-        fh.write(CONF_COMMENT)
-        fh.write("[f2m]\n")
-        for key in ("base_url", "mirrors", "proxy", "search_sort", "player",
-                    "download_dir", "user_agent"):
-            val = _cfg["_raw_mirrors"] if key == "mirrors" else _cfg[key]
-            fh.write(f"{key} = {val}\n")
+    _config_mgr.save()
 
 
 def ensure_config() -> None:
-    if not os.path.exists(CONF_PATH):
-        load_config()
-        save_config()
-        ok(f"created config file: {CONF_PATH}")
     load_config()
 
 
 def base_url() -> str:
-    return _cfg["base_url"].rstrip("/")
+    return str(_config_mgr.get("base_url", CONFIG_DEFAULTS["base_url"])).rstrip("/")
 
 
 def set_base_url(url: str, announce: bool = True) -> None:
     url = url.rstrip("/")
-    if _cfg["base_url"].rstrip("/") != url:
-        _cfg["base_url"] = url
-        save_config()
+    if base_url() != url:
+        _config_mgr.set("base_url", url)
         if announce:
-            info(f"base_url updated to {C.bold(url)} (saved to f2m.conf)")
+            info(f"base_url updated to {C.bold(url)} (saved to {CONF_PATH})")
 
 
 def proxies() -> dict[str, str | None]:
-    p = _cfg.get("proxy", "").strip()
+    p = str(_config_mgr.get("proxy", "")).strip()
     return {"http": p or None, "https": p or None} if p else {}
 
 
@@ -446,73 +428,8 @@ class PATTERNS:
 
 
 # ---------------------------------------------------------------------------
-# 5. DATA MODEL
+# 5. DATA MODEL (imported from f2m.core.models)
 # ---------------------------------------------------------------------------
-
-
-@dataclass
-class SearchResult:
-    kind: str
-    title: str
-    title_fa: str
-    year: str
-    rating: str
-    url: str
-    image: str
-    meta: str
-    is_dub: bool = False
-    is_hardsub: bool = False
-
-
-@dataclass
-class Card:
-    url: str
-    title: str
-    note: str = ""
-    poster: str = ""
-    year: str = ""
-    kind: str = ""
-
-
-@dataclass
-class Episode:
-    num: int
-    url: str
-    filename: str
-    label: str = ""
-
-
-@dataclass
-class Quality:
-    label: str
-    encoder: str = ""
-    episodes: list[Episode] = field(default_factory=list)
-
-
-@dataclass
-class Version:
-    key: str
-    title: str
-    qualities: list[Quality] = field(default_factory=list)
-
-
-@dataclass
-class Season:
-    title: str
-    versions: list[Version] = field(default_factory=list)
-
-
-@dataclass
-class Post:
-    url: str
-    title: str
-    year: str = ""
-    imdb_id: str = ""
-    rating: str = ""
-    is_series: bool = False
-    seasons: list[Season] = field(default_factory=list)
-    versions: list[Version] = field(default_factory=list)
-    trailer: str = ""
 
 
 def _strip_tags(html: str) -> str:
@@ -1281,9 +1198,11 @@ def settings_flow() -> None:
                 key = keys[choice]
                 val = prompt(f"new {key} [{_cfg[key]}]: ")
                 if val:
-                    _cfg[key] = val
-                    save_config()
-                    ok(f"{key} saved")
+                    try:
+                        _config_mgr.set(key, val)
+                        ok(f"{key} saved")
+                    except F2MConfigError as exc:
+                        err(str(exc))
 
 
 def test_connection() -> None:
@@ -1357,14 +1276,15 @@ def cli(argv: list[str]) -> None:
     elif cmd == "config":
         if len(argv) >= 3 and argv[1].lower() == "set":
             key, val = argv[2], " ".join(argv[3:])
-            if key == "base_url":
-                set_base_url(val)
-            elif key in CONFIG_DEFAULTS:
-                _cfg[key] = val
-                save_config()
-                ok(f"{key} saved")
-            else:
-                err(f"unknown key '{key}' — valid: {', '.join(CONFIG_DEFAULTS)}")
+            try:
+                if key == "base_url":
+                    set_base_url(val)
+                else:
+                    _config_mgr.set(key, val)
+                    ok(f"{key} saved")
+            except F2MConfigError as exc:
+                err(str(exc))
+                sys.exit(1)
         else:
             for key in ("base_url", "mirrors", "proxy", "search_sort", "player",
                         "download_dir", "user_agent"):
