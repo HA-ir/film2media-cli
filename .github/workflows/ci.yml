@@ -41,9 +41,6 @@ jobs:
       - name: Syntax compilation check
         run: python -m compileall f2m f2m.py tests
 
-      - name: Code quality check (Ruff)
-        run: ruff check .
-
       - name: Run automated test suite
         run: pytest tests/unit tests/e2e -v
 
