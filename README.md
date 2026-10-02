@@ -28,14 +28,33 @@ Search, browse, download and stream movies & series from Film2Media — right in
 
 ## 📦 Install
 
-### Option A — Ready binaries (no Python needed)
-
-Grab `f2m-windows-x64.exe` or `f2m-linux-x64` from the
-[**Releases**](https://github.com/lombalo/film2media-cli/releases) page and run it.
-
-### Option B — From source
+### Option A — Install as Python Package (Recommended)
 
 Requires Python 3.8+:
+
+```bash
+# Using pipx (recommended for standalone CLI tools)
+pipx install .
+
+# Or using standard pip
+pip install .
+```
+
+After installation, the `f2m` command is globally available on your terminal `$PATH`:
+
+```bash
+f2m --version
+f2m search "Inception"
+```
+
+### Option B — Ready binaries (no Python needed)
+
+Grab `f2m-windows-x64.exe` or `f2m-linux-x64` from the
+[**Releases**](https://github.com/HA-ir/film2media-cli/releases) page and run it.
+
+### Option C — Direct source execution
+
+You can also run directly from source without installation:
 
 ```bash
 python f2m.py
@@ -43,8 +62,8 @@ python f2m.py
 
 Optional companions:
 
-- **aria2c** — fast downloads
-- **mpv** or **VLC** — streaming
+- **aria2c** — fast multi-connection downloads
+- **mpv** or **VLC** — instant streaming
 
 ---
 

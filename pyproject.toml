@@ -8,7 +8,7 @@ version = "1.1.0"
 description = "Film2Media terminal client for searching, streaming, and downloading movies and series"
 readme = "README.md"
 requires-python = ">=3.8"
-license = { text = "MIT" }
+license = "MIT"
 authors = [
     { name = "HA-ir" }
 ]
@@ -19,7 +19,6 @@ classifiers = [
     "Programming Language :: Python :: 3.10",
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
-    "License :: OSI Approved :: MIT License",
     "Operating System :: OS Independent",
     "Environment :: Console",
     "Topic :: Multimedia :: Video",
@@ -35,10 +34,20 @@ dev = [
     "pytest-cov>=4.0.0",
     "pytest-mock>=3.10.0",
     "ruff>=0.1.0",
+    "build>=1.0.0",
+    "twine>=5.0.0",
 ]
 
 [project.scripts]
 f2m = "f2m:main"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["f2m*"]
+exclude = ["specs*", "tests*", "assets*"]
+
+[tool.setuptools]
+py-modules = ["f2m"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
