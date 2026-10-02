@@ -43,9 +43,22 @@ from urllib import request as urlrequest
 from f2m.core.exceptions import (
     F2MError,
     F2MConfigError,
+    F2MDownloadError,
     F2MNetworkError,
     F2MParseError,
     F2MCliError,
+)
+from f2m.integrations.downloader import (
+    DownloaderBackend,
+    DownloadRequest,
+    StreamRequest,
+    execute_download,
+    execute_stream,
+    export_links,
+    find_downloader,
+    get_install_instructions,
+    resolve_destination,
+    sanitize_filename,
 )
 from f2m.core.models import (
     SearchResult,
@@ -88,6 +101,7 @@ from f2m.ui import (
     render_search_table,
     status_spinner,
 )
+from rich.panel import Panel
 
 VERSION = "1.1.0"
 APP = "f2m"
@@ -391,227 +405,103 @@ def fetch_post(url: str) -> Post:
 
 
 # ---------------------------------------------------------------------------
-# 7. EXTERNAL TOOLS
+# 7. ACTIONS & DOWNLOAD MANAGEMENT
 # ---------------------------------------------------------------------------
 
 
-ARIA2_VERSION = "1.37.0"
-ARIA2_WIN_URL = ("https://github.com/aria2/aria2/releases/download/"
-                 f"release-{ARIA2_VERSION}/"
-                 f"aria2-{ARIA2_VERSION}-win-64bit-build1.zip")
-
-LINUX_PKG_MANAGERS = {
-    "apt-get": ["install", "-y"],
-    "dnf": ["install", "-y"],
-    "yum": ["install", "-y"],
-    "pacman": ["-S", "--noconfirm"],
-    "apk": ["add"],
-    "zypper": ["install", "-y"],
-}
-
-
-def app_dir() -> str:
-    if getattr(sys, "frozen", False):
-        return os.path.dirname(os.path.abspath(sys.executable))
-    return os.path.dirname(os.path.abspath(__file__))
-
-
-def local_aria2c() -> str | None:
-    exe = os.path.join(app_dir(), "aria2c.exe" if os.name == "nt" else "aria2c")
-    return exe if os.path.isfile(exe) else None
-
-
-def find_aria2c() -> str | None:
-    return local_aria2c() or shutil.which("aria2c")
-
-
-def install_aria2c_windows() -> str | None:
-    dest = app_dir()
-    zip_path = os.path.join(dest, "aria2.zip")
-    tmp = os.path.join(dest, "aria2-tmp")
-    target = os.path.join(dest, "aria2c.exe")
-    try:
-        with Spinner(f"downloading aria2c {ARIA2_VERSION}"):
-            req = urlrequest.Request(ARIA2_WIN_URL,
-                                     headers={"User-Agent": _cfg.get("user_agent", DEFAULT_UA)})
-            with _OPENER.open(req, timeout=TIMEOUT * 4) as resp, \
-                    open(zip_path, "wb") as fh:
-                shutil.copyfileobj(resp, fh)
-        with zipfile.ZipFile(zip_path) as zf:
-            member = next(n for n in zf.namelist() if n.endswith("aria2c.exe"))
-            zf.extract(member, tmp)
-            shutil.move(os.path.join(tmp, member), target)
-        ok(f"aria2c installed: {target}")
-        return target
-    except Exception as exc:
-        err(f"aria2c download failed: {exc}")
-        info(f"install it manually from https://github.com/aria2/aria2/releases")
-        return None
-    finally:
-        for path in (zip_path, tmp):
-            if os.path.isdir(path):
-                shutil.rmtree(path, ignore_errors=True)
-            elif os.path.exists(path):
-                os.remove(path)
-
-
-def install_aria2c_linux() -> str | None:
-    sudo = os.geteuid() != 0 and shutil.which("sudo")
-    for mgr, args in LINUX_PKG_MANAGERS.items():
-        if not shutil.which(mgr):
-            continue
-        cmd = ([sudo] if sudo else []) + [mgr] + args + ["aria2"]
-        info(f"installing aria2 via {mgr} …")
-        if subprocess.call(cmd) == 0 and shutil.which("aria2c"):
-            ok("aria2c installed")
-            return shutil.which("aria2c")
-        warn(f"{mgr} failed")
-    err("could not install aria2c automatically")
-    info("install it manually (e.g. sudo apt install aria2)")
-    return None
-
-
-def install_aria2c() -> str | None:
-    if os.name == "nt":
-        return install_aria2c_windows()
-    return install_aria2c_linux()
-
-
-def find_player() -> tuple[str | None, str]:
-    choice = _cfg.get("player", "auto").lower()
-    candidates: list[str] = ["mpv", "vlc", "potplayer"] if choice == "auto" else [choice]
-    for name in candidates:
-        if name == "mpv":
-            exe = shutil.which("mpv") or shutil.which("mpv.exe")
-            if exe:
-                return exe, "mpv"
-        elif name == "vlc":
-            exe = shutil.which("vlc") or shutil.which("vlc.exe")
-            for path in (r"C:\Program Files\VideoLAN\VLC\vlc.exe",
-                         r"C:\Program Files (x86)\VideoLAN\VLC\vlc.exe"):
-                if not exe and os.path.exists(path):
-                    exe = path
-            if exe:
-                return exe, "vlc"
-        elif name == "potplayer":
-            for path in (r"C:\Program Files\PotPlayer\PotPlayerMini64.exe",
-                         r"C:\Program Files (x86)\PotPlayer\PotPlayerMini64.exe",
-                         r"C:\Program Files\DAUM\PotPlayer\PotPlayerMini64.exe",
-                         r"C:\Program Files (x86)\DAUM\PotPlayer\PotPlayerMini64.exe"):
-                if os.path.exists(path):
-                    return path, "potplayer"
-    return None, choice
-
-
-def player_command(url: str | list[str], title: str) -> tuple[str, list[str]] | None:
-    exe, name = find_player()
-    if not exe:
-        return None
-    urls = url if isinstance(url, list) else [url]
-    proxy = _cfg.get("proxy", "").strip()
-    if name == "mpv":
-        cmd = [exe, "--force-media-title=" + title, "--keep-open=no"] + urls
-        if proxy:
-            cmd.insert(1, "--http-proxy=" + proxy)
-    elif name == "vlc":
-        cmd = [exe] + urls
-        if proxy:
-            cmd[1:1] = ["--http-proxy=" + proxy]
-    else:  # potplayer
-        cmd = [exe] + urls
-    return name, cmd
-
-
-# ---------------------------------------------------------------------------
-# 8. ACTIONS
-# ---------------------------------------------------------------------------
-
-
-def download_dir() -> str:
-    path = os.path.expanduser(_cfg["download_dir"])
-    os.makedirs(path, exist_ok=True)
-    return path
+def download_dir(subdir: str | None = None) -> str:
+    dest = resolve_destination(_cfg["download_dir"], subdir=subdir)
+    return str(dest)
 
 
 def do_download(urls: list[str], subdir: str | None = None) -> None:
     if not urls:
         warn("nothing selected")
         return
-    dest = download_dir()
-    if subdir:
-        dest = os.path.join(dest, sanitize(subdir))
-        os.makedirs(dest, exist_ok=True)
-    aria = find_aria2c()
-    if aria is None:
-        info("aria2c not found — trying to install it automatically")
-        aria = install_aria2c()
-        if aria is None:
-            warn("falling back to curl / plain links")
-    info(f"{len(urls)} file(s) → {C.bold(dest)}")
-    if aria:
-        cmd = [aria, "-x", "16", "-s", "16", "-j", "4",
-               "--file-allocation=none", "--console-log-level=warn",
-               "--summary-interval=0", "--download-result=hide",
-               "-d", dest] + urls
-        if _cfg.get("proxy", "").strip():
-            cmd += ["--all-proxy=" + _cfg["proxy"].strip()]
-        code = subprocess.call(cmd)
-        if code == 0:
-            ok("download finished")
+    try:
+        dest = resolve_destination(_cfg["download_dir"], subdir=subdir)
+    except F2MDownloadError as exc:
+        err(str(exc))
+        return
+
+    backend, exe = find_downloader()
+    if backend == DownloaderBackend.NONE:
+        warn("aria2c not found on PATH — manual installation command:")
+        cmd_help = get_install_instructions()
+        if sys.stderr.isatty():
+            get_stderr_console().print(Panel(f"[bold cyan]{cmd_help}[/bold cyan]", title="Install aria2c", border_style="yellow"))
         else:
-            warn(f"aria2c exited with code {code}")
-    elif shutil.which("curl"):
-        warn("aria2c not found — falling back to curl (single connections)")
-        for u in urls:
-            out = os.path.join(dest, sanitize(urlparse.unquote(u.rsplit("/", 1)[-1])))
-            print(f"  {C.cyan('→')} {u.rsplit('/', 1)[-1]}")
-            subprocess.call(["curl", "-L", "--fail", "-o", out, u])
-        ok("download finished")
-    else:
-        warn("neither aria2c nor curl found — links below:")
+            info(cmd_help)
+        warn("neither aria2c nor curl found on PATH — links below:")
         for u in urls:
             print("     " + u)
+        return
+
+    if backend == DownloaderBackend.CURL:
+        info("aria2c not found on PATH — manual installation command:")
+        cmd_help = get_install_instructions()
+        if sys.stderr.isatty():
+            get_stderr_console().print(Panel(f"[bold cyan]{cmd_help}[/bold cyan]", title="Recommended: Install aria2c", border_style="yellow"))
+        else:
+            info(cmd_help)
+        warn("falling back to curl (single connection)")
+
+    info(f"{len(urls)} file(s) → {C.bold(str(dest))}")
+    req = DownloadRequest(
+        urls=urls,
+        destination_dir=dest,
+        proxy=_cfg.get("proxy", "").strip() or None,
+    )
+    try:
+        res = execute_download(req)
+        if res.success:
+            ok("download finished")
+        else:
+            warn(res.error_message or f"download failed with exit code {res.exit_code}")
+    except KeyboardInterrupt:
+        sys.stderr.write("\ndownload cancelled\n")
+        sys.stderr.flush()
+        raise
+    except F2MDownloadError as exc:
+        err(str(exc))
 
 
 def do_stream(urls: list[str], title: str) -> None:
     if not urls:
         warn("nothing selected")
         return
-    resolved = player_command(urls, title)
-    if not resolved:
-        warn(f"no player found (config: player={_cfg['player']}). Install mpv/vlc/PotPlayer")
+    req = StreamRequest(
+        urls=urls,
+        title=title,
+        player=_cfg.get("player", "auto"),
+        proxy=_cfg.get("proxy", "").strip() or None,
+    )
+    res = execute_stream(req)
+    if not res.success:
+        warn(f"no player found (config: player={_cfg.get('player', 'auto')}). Install mpv/vlc/PotPlayer")
         info("link(s) to paste into your player:")
         for u in urls:
             print("     " + u)
         return
-    name, cmd = resolved
-    try:
-        subprocess.Popen(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-        ok(f"streaming with {C.bold(name)} → {'…' if len(urls) == 1 else f'{len(urls)} parts'}")
-    except OSError as exc:
-        err(f"could not launch {name}: {exc}")
+    ok(f"streaming with {C.bold(res.player_name)} → {'…' if len(urls) == 1 else f'{len(urls)} parts'}")
 
 
 def copy_links(urls: list[str], name_hint: str) -> None:
     if not urls:
         warn("nothing selected")
         return
-    path = os.path.join(download_dir(), sanitize(name_hint) + ".txt")
-    with open(path, "w", encoding="utf-8") as fh:
-        fh.write("\n".join(urls) + "\n")
-    ok(f"saved {len(urls)} link(s) → {C.bold(path)}")
-    if os.name == "nt" and shutil.which("clip"):
-        try:
-            subprocess.run("clip", input="\n".join(urls).encode("utf-16-le"),
-                           check=False)
+    try:
+        dest = resolve_destination(_cfg["download_dir"])
+        out_file = export_links(urls, dest, name_hint)
+        ok(f"saved {len(urls)} link(s) → {C.bold(str(out_file))}")
+        if os.name == "nt" and shutil.which("clip"):
             info("also copied to clipboard")
-        except OSError:
-            pass
+    except F2MDownloadError as exc:
+        err(str(exc))
 
 
 def sanitize(name: str) -> str:
-    name = unicodedata.normalize("NFKC", name)
-    return re.sub(r'[\\/:*?"<>|]+', "_", name).strip() or "f2m"
+    return sanitize_filename(name)
 
 
 # ---------------------------------------------------------------------------
