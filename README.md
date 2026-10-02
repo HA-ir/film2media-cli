@@ -19,7 +19,7 @@ Search, browse, download and stream movies & series from Film2Media — right in
 - 🔍 **Instant search** — search by English or Persian title, with IMDb rating and dub/hardsub badges
 - 🗂 **Browse** — movies, series, genres and Top-250 lists
 - ⬇ **Download** — multi-connection downloads with aria2c (fallback: curl)
-- 🤖 **Auto aria2c** — if aria2c is missing, f2m installs it for you (package manager on Linux, official binary on Windows)
+- 🛡️ **Zero sudo & secure execution** — downloads run strictly unprivileged with path traversal protection and atomic temporary staging (no automated package managers or root escalations)
 - ▶ **Stream** — watch instantly in mpv, VLC or PotPlayer without downloading
 - 🌐 **Auto domain update** — when the site moves to a new domain, f2m detects it and updates itself
 - 🧩 **Single file** — pure Python 3.8+, zero dependencies
@@ -194,6 +194,24 @@ Precedence: `Environment Variables (F2M_*) > Local ./f2m.conf > User XDG Config 
 - **Color & Pipeline Purity**:
   - Full compliance with `NO_COLOR` environment variable and `--no-color` flag.
   - Zero Rich markup or ANSI codes leak into machine-readable `--json` or `--plain` streams.
+
+---
+
+## 🛡️ Downloader Security & Permissions
+
+- **Zero Privilege Escalation (`sudo` removal)**:
+  - Normal downloads run strictly under the unprivileged invoking user's account.
+  - `f2m` never invokes `sudo`, `su`, or system package managers, and never triggers system password prompts.
+  - Unverified remote binary downloads from GitHub are completely eliminated.
+- **Strict `$PATH`-Only Tool Discovery**:
+  - Download accelerators (`aria2c`, `curl`) and media players are discovered strictly via system `$PATH`. Probing application directories for untrusted binaries is eliminated to prevent binary planting attacks.
+  - When `aria2c` is not installed, `f2m` displays clear, platform-specific copy-paste manual installation commands (`sudo apt install aria2`, `brew install aria2`, `winget install aria2`), immediately offering graceful fallback to `curl` or link export.
+- **Pre-Flight Write Validation & Traversal Defense**:
+  - Destination directories and parent paths are validated for write permissions (`os.access(W_OK)`) before creating directories or spawning subprocesses. Unwritable directories fail cleanly with exit code `1` and actionable messages without unhandled tracebacks.
+  - Target filenames and subdirectories are sanitized (Unicode NFKC normalization, stripping traversal tokens `..`, null bytes, control characters, and leading dashes) and asserted to reside strictly inside `download_dir`.
+- **Atomic Staging & Interruption Cleanup**:
+  - In-progress `curl` downloads write to temporary `.part` files and atomically replace the target via `os.replace()` upon exit code `0`.
+  - Incomplete `.part` files are deleted upon transfer failure or `Ctrl+C` (`SIGINT`), leaving zero corrupted media files on disk and exiting with POSIX code `130`.
 
 ---
 

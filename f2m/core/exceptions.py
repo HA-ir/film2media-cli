@@ -29,3 +29,9 @@ class F2MCliError(F2MError):
         super().__init__(message)
         self.exit_code = exit_code
 
+
+class F2MDownloadError(F2MError):
+    """Raised when download destination validation, process execution, or file handling fails."""
+    exit_code: int = 1
+
+

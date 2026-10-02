@@ -13,6 +13,7 @@ from f2m.core.config import CONFIG_DEFAULTS, ConfigManager, ConfigurationProfile
 from f2m.core.exceptions import (
     F2MCliError,
     F2MConfigError,
+    F2MDownloadError,
     F2MError,
     F2MNetworkError,
     F2MParseError,
@@ -347,6 +348,12 @@ class CliRunner:
             else:
                 emit_stderr(PlainFormatter.format_error(str(exc)))
             return 5
+        except F2MDownloadError as exc:
+            if format_mode == OutputFormat.JSON:
+                emit_stderr(JsonFormatter.format_error("DOWNLOAD_ERROR", str(exc), 1))
+            else:
+                emit_stderr(PlainFormatter.format_error(str(exc)))
+            return 1
         except KeyboardInterrupt:
             if format_mode == OutputFormat.JSON:
                 emit_stderr(JsonFormatter.format_error("SIGINT", "interrupted", 130))
