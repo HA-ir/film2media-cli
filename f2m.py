@@ -45,6 +45,7 @@ from f2m.core.exceptions import (
     F2MConfigError,
     F2MNetworkError,
     F2MParseError,
+    F2MCliError,
 )
 from f2m.core.models import (
     SearchResult,
@@ -74,6 +75,7 @@ from f2m.core.scraper import (
     parse_quick_search,
 )
 from f2m.net.client import HttpClient
+from f2m.cli.runner import CliRunner, run_cli
 
 VERSION = "1.1.0"
 APP = "f2m"
@@ -134,6 +136,7 @@ def banner() -> None:
 
 class Spinner:
     FRAMES = "⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏"
+    ENABLED = True
 
     def __init__(self, text: str = "fetching"):
         self.text = text
@@ -143,13 +146,13 @@ class Spinner:
     def _spin(self):
         i = 0
         while not self._stop.is_set():
-            sys.stdout.write(f"\r{C.cyan(self.FRAMES[i % len(self.FRAMES)])} {self.text}…  ")
-            sys.stdout.flush()
+            sys.stderr.write(f"\r{C.cyan(self.FRAMES[i % len(self.FRAMES)])} {self.text}…  ")
+            sys.stderr.flush()
             i += 1
             time.sleep(0.08)
 
     def __enter__(self):
-        if C.ENABLED:
+        if C.ENABLED and Spinner.ENABLED and sys.stderr.isatty():
             self._thread = threading.Thread(target=self._spin, daemon=True)
             self._thread.start()
         return self
@@ -158,8 +161,8 @@ class Spinner:
         self._stop.set()
         if self._thread:
             self._thread.join(timeout=0.5)
-        sys.stdout.write("\r" + " " * (len(self.text) + 6) + "\r")
-        sys.stdout.flush()
+        sys.stderr.write("\r" + " " * (len(self.text) + 6) + "\r")
+        sys.stderr.flush()
         return False
 
 
@@ -198,7 +201,7 @@ def run_interactive(fn, *args, **kwargs):
 def info(msg): print(f"{C.blue('ℹ')} {msg}")
 def ok(msg): print(f"{C.green('✔')} {msg}")
 def warn(msg): print(f"{C.yellow('⚠')} {msg}")
-def err(msg): print(f"{C.red('✖')} {msg}")
+def err(msg): sys.stderr.write(f"{C.red('✖')} {msg}\n"); sys.stderr.flush()
 
 
 def heading(text: str) -> None:
@@ -969,59 +972,37 @@ USAGE = f"""\
 """
 
 
+def get_runner() -> CliRunner:
+    handlers = {
+        "search_flow": search_flow,
+        "post_flow": post_flow,
+        "categories_flow": categories_flow,
+        "test_connection": test_connection,
+        "main_menu": main_menu,
+        "banner": banner,
+        "run_interactive": run_interactive,
+        "spinner_cls": Spinner,
+    }
+    return CliRunner(
+        config_mgr=_config_mgr,
+        http_client=_client,
+        interactive_handlers=handlers,
+    )
+
+
 def cli(argv: list[str]) -> None:
-    cmd = argv[0].lower()
-    if cmd in ("help", "--help", "-h"):
-        print(USAGE)
-    elif cmd == "search":
-        run_interactive(search_flow, " ".join(argv[1:]) or None)
-    elif cmd == "url":
-        if len(argv) < 2:
-            err("usage: f2m.py url <post-url>")
-            return
-        run_interactive(post_flow, argv[1].strip())
-    elif cmd == "categories":
-        run_interactive(categories_flow)
-    elif cmd == "config":
-        if len(argv) >= 3 and argv[1].lower() == "set":
-            key, val = argv[2], " ".join(argv[3:])
-            try:
-                if key == "base_url":
-                    set_base_url(val)
-                else:
-                    _config_mgr.set(key, val)
-                    ok(f"{key} saved")
-            except F2MConfigError as exc:
-                err(str(exc))
-                sys.exit(1)
-        else:
-            for key in ("base_url", "mirrors", "proxy", "search_sort", "player",
-                        "download_dir", "user_agent"):
-                val = _cfg["_raw_mirrors"] if key == "mirrors" else _cfg[key]
-                print(f"{C.cyan(key.ljust(13))} = {C.white(val)}")
-    elif cmd == "test":
-        test_connection()
-    else:
-        err(f"unknown command '{cmd}'")
-        print(USAGE)
+    code = get_runner().run(argv)
+    if code != 0:
+        sys.exit(code)
 
 
 def main() -> None:
     _enable_windows_vt()
     ensure_config()
     argv = [a for a in sys.argv[1:] if a.strip()]
-    try:
-        if argv:
-            cli(argv)
-        else:
-            banner()
-            run_interactive(main_menu)
-            print(C.grey("bye 👋"))
-    except KeyboardInterrupt:
-        print()
-        err("interrupted")
-    except F2MNetworkError as exc:
-        err(str(exc))
+    code = get_runner().run(argv)
+    if code != 0:
+        sys.exit(code)
 
 
 if __name__ == "__main__":
