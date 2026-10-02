@@ -11,6 +11,8 @@ from f2m.core.exceptions import F2MConfigError
 
 
 def test_resolve_config_path_default(monkeypatch, tmp_path):
+    if os.name == "nt":
+        pytest.skip("Test specifically covers POSIX XDG path resolution")
     fake_home = tmp_path / "home"
     fake_home.mkdir()
     monkeypatch.setenv("HOME", str(fake_home))
@@ -23,6 +25,8 @@ def test_resolve_config_path_default(monkeypatch, tmp_path):
 
 
 def test_resolve_config_path_custom_xdg(monkeypatch, tmp_path):
+    if os.name == "nt":
+        pytest.skip("Test specifically covers POSIX XDG path resolution")
     custom_xdg = tmp_path / "custom_xdg"
     custom_xdg.mkdir()
     monkeypatch.setenv("XDG_CONFIG_HOME", str(custom_xdg))
