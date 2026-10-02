@@ -124,6 +124,11 @@ def resolve_config_path() -> Path:
         return local_ini.resolve()
 
     # 3. User-global path
+    xdg_home = os.environ.get("XDG_CONFIG_HOME")
+    if xdg_home and xdg_home.strip():
+        base = Path(xdg_home.strip()).expanduser()
+        return (base / "f2m" / "config.ini").resolve()
+
     if os.name == "nt":
         appdata = os.environ.get("APPDATA")
         if appdata and appdata.strip():
@@ -139,14 +144,10 @@ def resolve_config_path() -> Path:
                     base = Path(os.environ.get("HOME", ".")) / "AppData" / "Roaming"
         return (base / "f2m" / "config.ini").resolve()
     else:
-        xdg_home = os.environ.get("XDG_CONFIG_HOME")
-        if xdg_home and xdg_home.strip():
-            base = Path(xdg_home.strip()).expanduser()
-        else:
-            try:
-                base = Path.home() / ".config"
-            except RuntimeError:
-                base = Path(os.environ.get("HOME", ".")) / ".config"
+        try:
+            base = Path.home() / ".config"
+        except RuntimeError:
+            base = Path(os.environ.get("HOME", ".")) / ".config"
         return (base / "f2m" / "config.ini").resolve()
 
 
