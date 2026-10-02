@@ -65,6 +65,15 @@ from f2m.core.config import (
     resolve_config_path,
     validate_key_value,
 )
+from f2m.core.scraper import (
+    clean_title,
+    parse_filename,
+    parse_categories,
+    parse_listing,
+    parse_post,
+    parse_quick_search,
+)
+from f2m.net.client import HttpClient
 
 VERSION = "1.1.0"
 APP = "f2m"
@@ -297,210 +306,33 @@ def proxies() -> dict[str, str | None]:
 # ---------------------------------------------------------------------------
 
 
-class F2MNetworkError(Exception):
-    pass
+def _get_http_client() -> HttpClient:
+    profile = _config_mgr.profile()
+    return HttpClient(
+        base_url=profile.base_url,
+        mirrors=profile.mirrors,
+        proxy=profile.proxy,
+        user_agent=profile.user_agent,
+        timeout=TIMEOUT,
+    )
 
 
-_OPENER = urlrequest.build_opener(
-    urlrequest.HTTPCookieProcessor(CookieJar()),
-    urlrequest.ProxyHandler(proxies()),
-)
-
-
-def _headers(referer: str | None, ajax: bool) -> dict[str, str]:
-    h = {
-        "User-Agent": _cfg["user_agent"],
-        "Accept": "*/*" if ajax else "text/html,application/xhtml+xml,*/*;q=0.8",
-        "Accept-Language": "en,fa;q=0.9",
-    }
-    if referer:
-        h["Referer"] = referer
-        split = urlparse.urlsplit(referer)
-        if split.netloc:
-            h["Origin"] = f"{split.scheme}://{split.netloc}"
-    if ajax:
-        h["X-Requested-With"] = "XMLHttpRequest"
-        h["Content-Type"] = "application/x-www-form-urlencoded; charset=UTF-8"
-    return h
-
-
-def maybe_update_domain(final_url: str) -> None:
-    try:
-        new_host = urlparse.urlsplit(final_url).netloc.lower()
-        old_host = urlparse.urlsplit(base_url()).netloc.lower()
-        if new_host and new_host != old_host and "f2m" in new_host:
-            scheme = urlparse.urlsplit(final_url).scheme or "https"
-            set_base_url(f"{scheme}://{new_host}")
-    except Exception:
-        pass
+_client = _get_http_client()
 
 
 def fetch(path_or_url: str, *, referer: str | None = None, ajax: bool = False,
           data: bytes | None = None, allow_mirrors: bool = True) -> str:
-    candidates: list[str] = []
-    if path_or_url.startswith("http"):
-        candidates.append(path_or_url)
-        if allow_mirrors and not data:
-            host = urlparse.urlsplit(path_or_url).netloc
-            path_q = urlparse.urlsplit(path_or_url).path
-            if host == urlparse.urlsplit(base_url()).netloc:
-                for mirror in _cfg["mirrors"]:
-                    alt = mirror.rstrip("/") + path_q
-                    if alt not in candidates:
-                        candidates.append(alt)
-    else:
-        base = base_url()
-        candidates.append(base + path_or_url)
-        if allow_mirrors and not data:
-            for mirror in _cfg["mirrors"]:
-                alt = mirror.rstrip("/") + path_or_url
-                if alt not in candidates:
-                    candidates.append(alt)
-
-    last_exc: Exception | None = None
-    for url in candidates:
-        req = urlrequest.Request(url, data=data, headers=_headers(referer or url, ajax))
-        try:
-            with _OPENER.open(req, timeout=TIMEOUT) as resp:
-                body = resp.read().decode("utf-8", errors="replace")
-                maybe_update_domain(resp.geturl())
-                return body
-        except urlerror.HTTPError as exc:
-            last_exc = exc
-            if exc.code in (403, 404, 429):
-                continue
-        except (urlerror.URLError, http.client.HTTPException, OSError,
-                TimeoutError) as exc:
-            last_exc = exc
-            continue
-    detail = f"{last_exc}" if last_exc else "unknown error"
-    raise F2MNetworkError(
-        f"could not reach {base_url()}\n"
-        f"      reason: {detail}\n"
-        f"      the domain may be filtered — try:  {APP} config set base_url https://<new-domain>\n"
-        f"      or add a mirror / proxy in {CONF_PATH}"
+    global _client
+    profile = _config_mgr.profile()
+    # Ensure client mirrors and proxy match current config
+    _client.timeout = TIMEOUT
+    return _client.fetch(
+        path_or_url,
+        referer=referer,
+        ajax=ajax,
+        data=data,
+        allow_mirrors=allow_mirrors,
     )
-
-
-# ---------------------------------------------------------------------------
-# 4. PATTERNS
-# ---------------------------------------------------------------------------
-
-
-class PATTERNS:
-    CARD = re.compile(r'<article class="entry".*?</article>', re.S)
-    CARD_URL = re.compile(r'<a href="(https?://[^"]+/)" class="stretched-link"')
-    CARD_TITLE = re.compile(r'<h2 class="entry-title">(.*?)</h2>', re.S)
-    CARD_IMG = re.compile(r'<img[^>]+src="(https?://[^"]+)"')
-    CARD_NOTE = re.compile(r'<p class="text-center[^"]*"[^>]*>(.*?)</p>', re.S)
-    PAGES = re.compile(r'href="https?://[^"]*?/page/(\d+)/')
-    PAGES_QS = re.compile(r'[?&]page=(\d+)')
-
-    GENRE_LINK = re.compile(
-        r'<a href="(?P<url>https?://[^"]+/genres/(?P<slug>[^/?"]+)/\?type=(?P<type>movie|series))"'
-        r'[^>]*>\s*(?P<name>[^<]+?)\s*</a>')
-    NAV_LINK = re.compile(
-        r'<a href="(https?://[^"]+/(?:movies|series|250tmdb|250tsdb|persons)/?)"[^>]*>\s*([^<]+?)\s*</a>')
-
-    OG_TITLE = re.compile(r'property="og:title" content="([^"]+)"')
-    H1 = re.compile(r'<h1[^>]*>(.*?)</h1>', re.S)
-    IMDB_ID = re.compile(r'imdb\.com/title/(tt\d+)')
-    IMDB_RATING = re.compile(r'<strong[^>]*>([\d.]+)</strong>\s*/\s*10')
-
-    SEASON_SPLIT = re.compile(r'<div class="download-season')
-    SEASON_TITLE = re.compile(r'aria-controls="[^"]*">\s*([^<]+)')
-    VERSION_LIST = re.compile(
-        r'<div class="download-list ([^" ]*)"><p class="title"><span>([^<]+)</span>')
-    LI_SPLIT = re.compile(r'<li[^>]*>')
-    QUALITY = re.compile(r'کیفیت\s*:</span>\s*<span[^>]*>([^<]+?)</span>')
-    ENCODER = re.compile(r'انکودر\s*:</span>\s*([^<]+?)\s*<')
-    EPISODE_ANCHOR = re.compile(
-        r'<a href="(?P<url>https?://[^"]+?\.(?:mkv|mp4|avi|mka))"[^>]*>\s*'
-        r'(?:قسمت\s*(?P<label>\d+))?')
-    DIRECT_ANCHOR = re.compile(
-        r'<a href="(?P<url>https?://[^"]+?\.(?:mkv|mp4|avi|mka))" download')
-    FILE_URL = re.compile(r'https?://[^\s"\'<>]+?\.(?:mkv|mp4|avi|mka)')
-
-    SE_TOKEN = re.compile(r'(?i)[._\- ]S(?P<s>\d{1,2})[._\- ]?E(?P<e>\d{1,3})(?![\d])')
-    DUB_TOKEN = re.compile(r'(?i)farsi[._\- ]?dubbed|farsi[._\- ]?dub\b')
-    SUB_TOKEN = re.compile(r'(?i)hard[._\- ]?sub|farsi[._\- ]?sub')
-    TRAILER_TOKEN = re.compile(r'(?i)trailer')
-
-
-# ---------------------------------------------------------------------------
-# 5. DATA MODEL (imported from f2m.core.models)
-# ---------------------------------------------------------------------------
-
-
-def _strip_tags(html: str) -> str:
-    return unescape(re.sub(r"<[^>]+>", "", html)).strip()
-
-
-_TITLE_NOISE = [
-    r"^\s*دانلود\s*",
-    r"با\s*زیرنویس\s*فارسی\s*چسبیده",
-    r"با\s*زیرنویس\s*چسبیده",
-    r"زیرنویس\s*فارسی",
-    r"بدون\s*سانسور",
-    r"با\s*دوبله\s*فارسی",
-    r"دوبله\s*فارسی",
-]
-
-
-def clean_title(raw: str) -> str:
-    t = raw
-    for pattern in _TITLE_NOISE:
-        t = re.sub(pattern, " ", t)
-    return re.sub(r"\s+", " ", t).strip(" -،,") or raw.strip()
-
-
-def _version_key(css_class: str, title: str) -> str:
-    if "dub" in css_class.lower() or "دوبله" in title:
-        return "dub"
-    return "hardsub"
-
-
-def parse_filename(url: str) -> tuple[str, int | None, int | None, str]:
-    filename = urlparse.unquote(url.rsplit("/", 1)[-1])
-    se = PATTERNS.SE_TOKEN.search(filename)
-    season = int(se.group("s")) if se else None
-    episode = int(se.group("e")) if se else None
-    version = ""
-    if PATTERNS.DUB_TOKEN.search(filename):
-        version = "dub"
-    elif PATTERNS.SUB_TOKEN.search(filename):
-        version = "hardsub"
-    return filename, season, episode, version
-
-
-def ygroup(m: re.Match | None) -> str:
-    return m.group(0).strip("-/") if m else ""
-
-
-def parse_listing(html: str) -> tuple[list[Card], int]:
-    cards: list[Card] = []
-    seen: set[str] = set()
-    for chunk in PATTERNS.CARD.findall(html):
-        um = PATTERNS.CARD_URL.search(chunk)
-        if not um:
-            continue
-        url = um.group(1)
-        if url in seen:
-            continue
-        seen.add(url)
-        tm = PATTERNS.CARD_TITLE.search(chunk)
-        title = _strip_tags(tm.group(1)) if tm else url.rstrip("/").rsplit("/", 1)[-1]
-        im = PATTERNS.CARD_IMG.search(chunk)
-        nm = PATTERNS.CARD_NOTE.search(chunk)
-        ym = re.search(r"-(19|20)(\d{2})/?$", url.rstrip("/"))
-        kind = "series" if "/series/" in url else "movie"
-        cards.append(Card(url=url, title=title, note=_strip_tags(nm.group(1)) if nm else "",
-                          poster=im.group(1) if im else "", year=ygroup(ym), kind=kind))
-    last = 1
-    for pattern in (PATTERNS.PAGES, PATTERNS.PAGES_QS):
-        for m in pattern.finditer(html):
-            last = max(last, int(m.group(1)))
-    return cards, last
 
 
 def page_url(base_path: str, page: int) -> str:
@@ -510,113 +342,6 @@ def page_url(base_path: str, page: int) -> str:
         path, _, query = base_path.partition("?")
         return f"{path.rstrip('/')}/page/{page}/?{query}"
     return f"{base_path.rstrip('/')}/page/{page}/"
-
-
-def parse_post(html: str, url: str) -> Post:
-    tm = PATTERNS.OG_TITLE.search(html) or PATTERNS.H1.search(html)
-    title = clean_title(_strip_tags(tm.group(1))) if tm else url.rstrip("/").rsplit("/", 1)[-1]
-    im = PATTERNS.IMDB_ID.search(html)
-    rm = PATTERNS.IMDB_RATING.search(html)
-    ym = re.search(r"-(19|20)(\d{2})/?$", url.rstrip("/"))
-    post = Post(url=url, title=title, year=ygroup(ym),
-                imdb_id=im.group(1) if im else "",
-                rating=rm.group(1) if rm else "")
-
-    for chunk in PATTERNS.SEASON_SPLIT.split(html)[1:]:
-        hm = PATTERNS.SEASON_TITLE.search(chunk)
-        season = Season(title=_strip_tags(hm.group(1)) if hm else "Season")
-        for vm in PATTERNS.VERSION_LIST.finditer(chunk):
-            start = vm.end()
-            nxt = PATTERNS.VERSION_LIST.search(chunk, start)
-            vchunk = chunk[start:nxt.start()] if nxt else chunk[start:]
-            version = Version(key=_version_key(vm.group(1), vm.group(2)),
-                              title=_strip_tags(vm.group(2)))
-            for li in PATTERNS.LI_SPLIT.split(vchunk)[1:]:
-                li = li.split("</li>")[0]
-                qm = PATTERNS.QUALITY.search(li)
-                em = PATTERNS.ENCODER.search(li)
-                quality = Quality(label=_strip_tags(qm.group(1)) if qm else "unknown",
-                                  encoder=_strip_tags(em.group(1)) if em else "")
-                episodes: dict[int, Episode] = {}
-                for am in PATTERNS.EPISODE_ANCHOR.finditer(li):
-                    ep_url = am.group("url")
-                    if PATTERNS.TRAILER_TOKEN.search(ep_url):
-                        post.trailer = post.trailer or ep_url
-                        continue
-                    _, s, e, _ = parse_filename(ep_url)
-                    num = e or (int(am.group("label")) if am.group("label") else len(episodes) + 1)
-                    if num not in episodes:
-                        episodes[num] = Episode(
-                            num=num, url=ep_url,
-                            filename=urlparse.unquote(ep_url.rsplit("/", 1)[-1]),
-                            label=f"قسمت {num}")
-                quality.episodes = [episodes[k] for k in sorted(episodes)]
-                if quality.episodes:
-                    version.qualities.append(quality)
-            if version.qualities:
-                season.versions.append(version)
-        if season.versions:
-            post.seasons.append(season)
-
-    if not post.seasons:
-        for vm in PATTERNS.VERSION_LIST.finditer(html):
-            start = vm.end()
-            nxt = PATTERNS.VERSION_LIST.search(html, start)
-            vchunk = html[start:nxt.start()] if nxt else html[start:start + 20000]
-            version = Version(key=_version_key(vm.group(1), vm.group(2)),
-                              title=_strip_tags(vm.group(2)))
-            for li in PATTERNS.LI_SPLIT.split(vchunk)[1:]:
-                li = li.split("</li>")[0]
-                qm = PATTERNS.QUALITY.search(li)
-                em = PATTERNS.ENCODER.search(li)
-                quality = Quality(label=_strip_tags(qm.group(1)) if qm else "unknown",
-                                  encoder=_strip_tags(em.group(1)) if em else "")
-                dm = PATTERNS.DIRECT_ANCHOR.search(li)
-                if not dm:
-                    fm = PATTERNS.FILE_URL.search(li)
-                    dm = fm
-                if dm:
-                    ep_url = dm.group("url") if "url" in dm.groupdict() else dm.group(0)
-                    if PATTERNS.TRAILER_TOKEN.search(ep_url):
-                        post.trailer = post.trailer or ep_url
-                    else:
-                        quality.episodes.append(
-                            Episode(num=1, url=ep_url,
-                                    filename=urlparse.unquote(ep_url.rsplit("/", 1)[-1])))
-                for fm in PATTERNS.FILE_URL.finditer(li):
-                    if PATTERNS.TRAILER_TOKEN.search(fm.group(0)):
-                        post.trailer = post.trailer or fm.group(0)
-                if quality.episodes:
-                    version.qualities.append(quality)
-            if version.qualities:
-                post.versions.append(version)
-
-    post.is_series = bool(post.seasons) or "/series/" in url
-
-    if not post.trailer:
-        for m in PATTERNS.FILE_URL.finditer(html):
-            if PATTERNS.TRAILER_TOKEN.search(m.group(0)):
-                post.trailer = m.group(0)
-                break
-    return post
-
-
-def parse_categories(html: str) -> tuple[list[tuple[str, str]], dict[str, list[tuple[str, str]]]]:
-    sections: list[tuple[str, str]] = []
-    seen: set[str] = set()
-    for url, name in PATTERNS.NAV_LINK.findall(html):
-        if url not in seen:
-            seen.add(url)
-            sections.append((_strip_tags(name), url))
-    genres: dict[str, list[tuple[str, str]]] = {"movie": [], "series": []}
-    seen_g: set[str] = set()
-    for m in PATTERNS.GENRE_LINK.finditer(html):
-        url = m.group("url")
-        if url in seen_g:
-            continue
-        seen_g.add(url)
-        genres[m.group("type")].append((_strip_tags(m.group("name")), url))
-    return sections, genres
 
 
 # ---------------------------------------------------------------------------
@@ -632,26 +357,10 @@ def quick_search(query: str) -> list[SearchResult]:
                          referer=base_url() + "/", allow_mirrors=False)
         items = json.loads(text)
         if isinstance(items, list) and items:
-            results = []
-            for it in items:
-                if not isinstance(it, dict) or not it.get("url"):
-                    continue
-                title = re.sub(r"</?em>", "", str(it.get("title", "")))
-                results.append(SearchResult(
-                    kind="series" if it.get("type") == "series" else "movie",
-                    title=unescape(title),
-                    title_fa=unescape(str(it.get("title_fa", "") or "")),
-                    year=str(it.get("year", "") or ""),
-                    rating=str(it.get("rating", "") or ""),
-                    url=urlparse.urljoin(base_url() + "/", str(it["url"])),
-                    image=str(it.get("image", "") or ""),
-                    meta=unescape(str(it.get("meta_data", "") or "")),
-                    is_dub=bool(it.get("is_dubbled")),
-                    is_hardsub=bool(it.get("is_hardsub")),
-                ))
+            results = parse_quick_search(items, base_url())
             if results:
                 return results
-    except (F2MNetworkError, json.JSONDecodeError, ValueError) as exc:
+    except (F2MNetworkError, F2MParseError, json.JSONDecodeError, ValueError) as exc:
         warn(f"quick-search endpoint failed ({exc}); falling back to HTML search")
     with Spinner(f"searching “{query}”"):
         html = fetch("/?s=" + urlparse.quote(query))
