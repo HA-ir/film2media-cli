@@ -4,6 +4,7 @@ Exports main CLI functions and variables for backward compatibility.
 """
 
 __version__ = "1.1.0"
+VERSION = __version__
 
 # Re-export key legacy module members from root f2m.py if imported as `import f2m` or `from f2m import ...`
 try:

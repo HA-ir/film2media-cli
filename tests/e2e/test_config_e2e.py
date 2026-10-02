@@ -11,6 +11,7 @@ REPO_ROOT = Path(__file__).resolve().parent.parent.parent
 def run_cli(*args, env=None, cwd=None) -> subprocess.CompletedProcess:
     """Helper to run the CLI via subprocess in deterministic offline test environments."""
     full_env = os.environ.copy()
+    full_env["PYTHONIOENCODING"] = "utf-8"
     if env:
         full_env.update(env)
     cmd = [sys.executable, str(REPO_ROOT / "f2m.py")] + list(args)
@@ -18,6 +19,8 @@ def run_cli(*args, env=None, cwd=None) -> subprocess.CompletedProcess:
         cmd,
         capture_output=True,
         text=True,
+        encoding="utf-8",
+        errors="replace",
         env=full_env,
         cwd=cwd or str(REPO_ROOT),
     )
@@ -31,9 +34,9 @@ def test_e2e_config_persistence(tmp_path):
     fake_home = tmp_path / "user_home"
     fake_home.mkdir()
 
-    env = {"HOME": str(fake_home)}
+    env = {"HOME": str(fake_home), "USERPROFILE": str(fake_home), "XDG_CONFIG_HOME": str(fake_home / ".config")}
     # Unset other overriding env vars
-    for k in ("XDG_CONFIG_HOME", "F2M_CONFIG", "F2M_DOWNLOAD_DIR"):
+    for k in ("F2M_CONFIG", "F2M_DOWNLOAD_DIR", "APPDATA"):
         env.pop(k, None)
 
     # 1. Run f2m config set download_dir ~/Movies
@@ -72,9 +75,13 @@ def test_e2e_permission_safety(tmp_path):
     os.chmod(ro_app_dir, 0o555)
 
     try:
-        env = {"HOME": str(fake_home)}
+        env = os.environ.copy()
+        env["HOME"] = str(fake_home)
+        env["USERPROFILE"] = str(fake_home)
+        env["XDG_CONFIG_HOME"] = str(fake_home / ".config")
+        env["PYTHONIOENCODING"] = "utf-8"
         cmd = [sys.executable, str(ro_app_dir / "f2m.py"), "config", "set", "proxy", "http://127.0.0.1:8080"]
-        res = subprocess.run(cmd, capture_output=True, text=True, env=env)
+        res = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8", errors="replace", env=env)
 
         # Must succeed with exit code 0
         assert res.returncode == 0
@@ -115,11 +122,15 @@ def test_e2e_legacy_migration(tmp_path):
         encoding="utf-8",
     )
 
-    env = {"HOME": str(fake_home)}
+    env = os.environ.copy()
+    env["HOME"] = str(fake_home)
+    env["USERPROFILE"] = str(fake_home)
+    env["XDG_CONFIG_HOME"] = str(fake_home / ".config")
+    env["PYTHONIOENCODING"] = "utf-8"
     cmd = [sys.executable, str(app_dir / "f2m.py"), "config"]
 
     # First run: migration happens
-    res = subprocess.run(cmd, capture_output=True, text=True, env=env)
+    res = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8", errors="replace", env=env)
     assert res.returncode == 0
     assert "https://migrated-site.xyz" in res.stdout
 

@@ -16,6 +16,7 @@ REPO_ROOT = Path(__file__).resolve().parent.parent.parent
 def run_cli(*args, env=None) -> subprocess.CompletedProcess:
     """Helper to run f2m.py via subprocess."""
     full_env = os.environ.copy()
+    full_env["PYTHONIOENCODING"] = "utf-8"
     if env:
         full_env.update(env)
     cmd = [sys.executable, str(REPO_ROOT / "f2m.py")] + list(args)
@@ -23,6 +24,8 @@ def run_cli(*args, env=None) -> subprocess.CompletedProcess:
         cmd,
         capture_output=True,
         text=True,
+        encoding="utf-8",
+        errors="replace",
         env=full_env,
         cwd=str(REPO_ROOT),
     )

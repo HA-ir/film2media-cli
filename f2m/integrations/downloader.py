@@ -161,11 +161,21 @@ def assert_path_contained(target_path: Path, base_dir: Path) -> None:
     """
     Validates that target_path strictly resides within base_dir.
     Raises F2MDownloadError if the path escapes.
+    Compatible with Python 3.8+ (Path.is_relative_to was added in 3.9).
     """
     try:
         resolved_target = target_path.resolve()
         resolved_base = base_dir.resolve()
-        if not resolved_target.is_relative_to(resolved_base):
+        try:
+            if hasattr(resolved_target, "is_relative_to"):
+                is_contained = resolved_target.is_relative_to(resolved_base)
+            else:
+                resolved_target.relative_to(resolved_base)
+                is_contained = True
+        except ValueError:
+            is_contained = False
+
+        if not is_contained:
             raise F2MDownloadError(
                 f"Security violation: path traversal detected for '{target_path}' outside '{base_dir}'"
             )
