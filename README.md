@@ -180,6 +180,23 @@ Precedence: `Environment Variables (F2M_*) > Local ./f2m.conf > User XDG Config 
 
 ---
 
+## 🎨 Terminal UI & RTL Architecture
+
+- **Rich Terminal Presentation**: Built using `rich` with styled panels, rounded tables, clear typography, and transient status indicators on `stderr`.
+- **Bidirectional & Persian Text Safety**:
+  - **Structural Column Isolation**: Persian titles, original English titles, years, and ratings are segregated into dedicated table columns, preventing BiDi layout collisions.
+  - **Verbatim LTR Token Protection**: URLs, filesystem paths, download filenames, and machine tokens are strictly protected from text reversal or directional corruption.
+  - **Accurate Cell Widths**: Calculates visual terminal cell width using `rich.cells.cell_len` to correctly handle Persian characters and zero-width non-joiners (`‌`), guaranteeing unbroken table borders.
+  - **Markup Injection Defense**: Scraped and user-supplied strings are sanitized via `rich.markup.escape()` to prevent bracketed tokens (e.g. `[1080p]`) from misinterpreting as BBCode markup tags.
+- **Responsive Geometry Adaptation**:
+  - Automatically wraps and folds columns on standard 80x24 terminals.
+  - Switches to a compact card listing on narrow viewports (< 65 columns) to avoid line overflow.
+- **Color & Pipeline Purity**:
+  - Full compliance with `NO_COLOR` environment variable and `--no-color` flag.
+  - Zero Rich markup or ANSI codes leak into machine-readable `--json` or `--plain` streams.
+
+---
+
 ## 🛠 Development & Testing
 
 Set up the development environment and run automated tests:
