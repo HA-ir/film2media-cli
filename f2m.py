@@ -76,6 +76,18 @@ from f2m.core.scraper import (
 )
 from f2m.net.client import HttpClient
 from f2m.cli.runner import CliRunner, run_cli
+from f2m.ui import (
+    MenuItem,
+    get_stdout_console,
+    get_stderr_console,
+    protect_ltr,
+    render_banner,
+    render_menu,
+    render_post_header,
+    render_quality_table,
+    render_search_table,
+    status_spinner,
+)
 
 VERSION = "1.1.0"
 APP = "f2m"
@@ -127,42 +139,30 @@ def _enable_windows_vt() -> None:
 
 
 def banner() -> None:
-    top = "╔" + "═" * 46 + "╗"
-    bot = "╚" + "═" * 46 + "╝"
-    print(C.magenta(top))
-    print(C.magenta("║") + C.bold(C.white("   ⚡ F2M ")) + C.grey("· film2media terminal client ") + C.grey(f"v{VERSION}".rjust(9)) + C.magenta("║"))
-    print(C.magenta(bot))
+    if sys.stdout.isatty():
+        get_stdout_console().print(render_banner(base_url()))
+    else:
+        top = "╔" + "═" * 46 + "╗"
+        bot = "╚" + "═" * 46 + "╝"
+        print(C.magenta(top))
+        print(C.magenta("║") + C.bold(C.white("   ⚡ F2M ")) + C.grey("· film2media terminal client ") + C.grey(f"v{VERSION}".rjust(9)) + C.magenta("║"))
+        print(C.magenta(bot))
 
 
 class Spinner:
-    FRAMES = "⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏"
     ENABLED = True
 
     def __init__(self, text: str = "fetching"):
         self.text = text
-        self._stop = threading.Event()
-        self._thread: threading.Thread | None = None
-
-    def _spin(self):
-        i = 0
-        while not self._stop.is_set():
-            sys.stderr.write(f"\r{C.cyan(self.FRAMES[i % len(self.FRAMES)])} {self.text}…  ")
-            sys.stderr.flush()
-            i += 1
-            time.sleep(0.08)
+        self._ctx = None
 
     def __enter__(self):
-        if C.ENABLED and Spinner.ENABLED and sys.stderr.isatty():
-            self._thread = threading.Thread(target=self._spin, daemon=True)
-            self._thread.start()
-        return self
+        self._ctx = status_spinner(self.text, enabled=Spinner.ENABLED)
+        return self._ctx.__enter__()
 
     def __exit__(self, *exc):
-        self._stop.set()
-        if self._thread:
-            self._thread.join(timeout=0.5)
-        sys.stderr.write("\r" + " " * (len(self.text) + 6) + "\r")
-        sys.stderr.flush()
+        if self._ctx:
+            return self._ctx.__exit__(*exc)
         return False
 
 
@@ -216,13 +216,20 @@ def menu(title: str, options: list[tuple[str, str]], back: str = "← Back",
         Screen.frame()
     if header:
         header()
-    heading(title)
     icons = {"search": "🔍", "categories": "🗂 ", "url": "🌐", "settings": "⚙ ",
              "download": "⬇ ", "stream": "▶ ", "trailer": "🎬", "copy": "📋",
              "series": "📺", "movie": "🎞 "}
-    for i, (label, icon_key) in enumerate(options, 1):
-        icon = icons.get(icon_key, "•")
-        print(f"   {C.cyan(str(i).rjust(2))}. {icon} {label}")
+    if sys.stdout.isatty():
+        items = [
+            MenuItem(index=i, label=label, icon=icons.get(icon_key, "•"), key=icon_key)
+            for i, (label, icon_key) in enumerate(options, 1)
+        ]
+        get_stdout_console().print(render_menu(title, items))
+    else:
+        heading(title)
+        for i, (label, icon_key) in enumerate(options, 1):
+            icon = icons.get(icon_key, "•")
+            print(f"   {C.cyan(str(i).rjust(2))}. {icon} {label}")
     print(f"   {C.cyan(' 0')}. {C.grey(back)}")
     while True:
         try:
@@ -613,27 +620,33 @@ def sanitize(name: str) -> str:
 
 
 def show_post_header(post: Post) -> None:
-    heading(post.title)
-    bits = []
-    if post.rating:
-        bits.append(C.yellow("★ " + post.rating + "/10"))
-    if post.imdb_id:
-        bits.append(C.grey(post.imdb_id))
-    if post.year:
-        bits.append(C.grey(post.year))
-    bits.append(C.magenta("series" if post.is_series else "movie"))
-    print("   " + "  ".join(bits))
+    if sys.stdout.isatty():
+        get_stdout_console().print(render_post_header(post))
+    else:
+        heading(post.title)
+        bits = []
+        if post.rating:
+            bits.append(C.yellow("★ " + post.rating + "/10"))
+        if post.imdb_id:
+            bits.append(C.grey(post.imdb_id))
+        if post.year:
+            bits.append(C.grey(post.year))
+        bits.append(C.magenta("series" if post.is_series else "movie"))
+        print("   " + "  ".join(bits))
 
 
 def choose_quality(qualities: list[Quality], header=None) -> Quality | None:
     Screen.frame()
     if header:
         header()
-    heading("Quality")
-    for i, q in enumerate(qualities, 1):
-        enc = f"  {C.grey('enc: ' + q.encoder)}" if q.encoder and q.encoder.lower() != "unknown" else ""
-        count = f"  {C.grey(str(len(q.episodes)) + ' eps')}" if len(q.episodes) > 1 else ""
-        print(f"   {C.cyan(str(i).rjust(2))}. {C.white(q.label)}{enc}{count}")
+    if sys.stdout.isatty():
+        get_stdout_console().print(render_quality_table(qualities))
+    else:
+        heading("Quality")
+        for i, q in enumerate(qualities, 1):
+            enc = f"  {C.grey('enc: ' + q.encoder)}" if q.encoder and q.encoder.lower() != "unknown" else ""
+            count = f"  {C.grey(str(len(q.episodes)) + ' eps')}" if len(q.episodes) > 1 else ""
+            print(f"   {C.cyan(str(i).rjust(2))}. {C.white(q.label)}{enc}{count}")
     print(f"   {C.cyan(' 0')}. {C.grey('← Back')}")
     while True:
         raw = prompt("")
@@ -679,7 +692,7 @@ def after_selection(post: Post, urls: list[str], name_hint: str, label: str,
         header()
     heading(f"{label} — {len(urls)} file(s)")
     for u in urls[:6]:
-        print(f"     {C.grey(urlparse.unquote(u.rsplit('/', 1)[-1]))}")
+        print(f"     {C.grey(protect_ltr(urlparse.unquote(u.rsplit('/', 1)[-1])))}")
     if len(urls) > 6:
         print(C.grey(f"     … and {len(urls) - 6} more"))
     actions = [("Download (aria2c)", "download"),
@@ -859,19 +872,22 @@ def search_flow(query: str | None = None) -> None:
         return
     while True:
         Screen.frame()
-        heading(f"Results for “{query}” ({len(results)})")
-        for i, r in enumerate(results, 1):
-            icon = C.magenta("📺") if r.kind == "series" else C.cyan("🎞 ")
-            title = C.white(r.title)
-            if r.title_fa:
-                title += f"  {C.grey(r.title_fa)}"
-            year = C.grey(r.year) if r.year else ""
-            rating = C.yellow("★" + r.rating) if r.rating else ""
-            meta = C.grey(f"  {r.meta}") if r.meta else ""
-            badges = " ".join(b for b in (
-                C.green("[dub]") if r.is_dub else "",
-                C.blue("[hardsub]") if r.is_hardsub else "") if b)
-            print(f"   {C.cyan(str(i).rjust(2))}. {icon} {title} {year} {rating} {badges}{meta}")
+        if sys.stdout.isatty():
+            get_stdout_console().print(render_search_table(results))
+        else:
+            heading(f"Results for “{query}” ({len(results)})")
+            for i, r in enumerate(results, 1):
+                icon = C.magenta("📺") if r.kind == "series" else C.cyan("🎞 ")
+                title = C.white(r.title)
+                if r.title_fa:
+                    title += f"  {C.grey(r.title_fa)}"
+                year = C.grey(r.year) if r.year else ""
+                rating = C.yellow("★" + r.rating) if r.rating else ""
+                meta = C.grey(f"  {r.meta}") if r.meta else ""
+                badges = " ".join(b for b in (
+                    C.green("[dub]") if r.is_dub else "",
+                    C.blue("[hardsub]") if r.is_hardsub else "") if b)
+                print(f"   {C.cyan(str(i).rjust(2))}. {icon} {title} {year} {rating} {badges}{meta}")
         print(f"   {C.cyan(' 0')}. {C.grey('← Back')}")
         raw = prompt("").lower()
         if raw in ("0", "q", "b", ""):
